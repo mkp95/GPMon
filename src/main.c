@@ -1,4 +1,5 @@
 #include "board.h"
+#include "mm.h"
 #include "bflb_mtimer.h"
 #include "gpmon_core.h"
 #include "uart_capture.h"
@@ -33,6 +34,22 @@ static gpmon_core_t s_core;
 static QueueHandle_t s_tcp_queue;
 static uint32_t s_tcp_queue_drops;
 static UBaseType_t s_tcp_queue_capacity;
+
+static void print_memory_stats(void)
+{
+#if CONFIG_MM_ENABLE_STATISTICS
+    unsigned long alloc_failures =
+        (unsigned long)g_mem_manager.stats.total_malloc_failures;
+#else
+    unsigned long alloc_failures = 0ul;
+#endif
+
+    printf("Memory OCRAM: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\\r\\n",
+           (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
+           (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
+           (unsigned long)kmin_free_size(),
+           alloc_failures);
+}
 
 #if GPMON_VERBOSE_PACKET_LOG
 static void print_packet(const gpmon_record_t *record)
@@ -137,6 +154,7 @@ static void uart_capture_task(void *arg)
                    (unsigned long)(s_core.queue.capacity * sizeof(gpmon_record_t)),
                    (unsigned long)s_core.framer.stats.packets_dropped,
                    (unsigned long)s_tcp_queue_drops);
+            print_memory_stats();
             next_stats_us += 1000000ull;
         }
 
