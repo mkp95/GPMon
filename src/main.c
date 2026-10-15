@@ -34,6 +34,7 @@ static gpmon_core_t s_core;
 static QueueHandle_t s_tcp_queue;
 static uint32_t s_tcp_queue_drops;
 static UBaseType_t s_tcp_queue_capacity;
+static size_t s_min_free_ocram;
 
 static unsigned long memory_allocation_failures(void)
 {
@@ -46,9 +47,15 @@ static unsigned long memory_allocation_failures(void)
 
 static void print_memory_stats(void)
 {
-    printf("Memory OCRAM: free=%lu min_free=%lu alloc_failures=%lu\r\n",
-           (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
-           (unsigned long)kmin_free_size(),
+    size_t free_bytes = kfree_size(MM_HEAP_OCRAM_0);
+
+    if (s_min_free_ocram == 0u || free_bytes < s_min_free_ocram) {
+        s_min_free_ocram = free_bytes;
+    }
+
+    printf("Memory OCRAM: free=%lu min_observed_free=%lu alloc_failures=%lu\r\n",
+           (unsigned long)free_bytes,
+           (unsigned long)s_min_free_ocram,
            memory_allocation_failures());
 }
 
@@ -56,10 +63,12 @@ static void print_memory_stats(void)
  * once before the scheduler starts and UART RX interrupts are enabled. */
 static void print_startup_memory_stats(void)
 {
-    printf("Memory OCRAM startup: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\r\n",
-           (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
+    size_t free_bytes = kfree_size(MM_HEAP_OCRAM_0);
+
+    s_min_free_ocram = free_bytes;
+    printf("Memory OCRAM startup: free=%lu largest_block=%lu alloc_failures=%lu\r\n",
+           (unsigned long)free_bytes,
            (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
-           (unsigned long)kmin_free_size(),
            memory_allocation_failures());
 }
 
