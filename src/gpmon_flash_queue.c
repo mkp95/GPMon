@@ -47,6 +47,7 @@ static struct lfs_config s_lfs_cfg = {
 };
 static lfs_t *s_lfs;
 static SemaphoreHandle_t s_lock;
+static SemaphoreHandle_t s_lfs_lock;
 static spool_state_t s_state;
 static uint32_t s_pending;
 static uint32_t s_file_size;
@@ -54,6 +55,24 @@ static uint32_t s_write_failures;
 static uint32_t s_corrupt_records;
 static int s_ready;
 static int s_spill_latched;
+
+#ifdef LFS_THREADSAFE
+static int spool_lfs_lock(const struct lfs_config *cfg)
+{
+    (void)cfg;
+    return (s_lfs_lock != NULL &&
+            xSemaphoreTake(s_lfs_lock, portMAX_DELAY) == pdTRUE)
+           ? 0 : LFS_ERR_IO;
+}
+
+static int spool_lfs_unlock(const struct lfs_config *cfg)
+{
+    (void)cfg;
+    if (s_lfs_lock != NULL) xSemaphoreGive(s_lfs_lock);
+    return 0;
+}
+
+#endif
 
 static uint32_t crc_update(uint32_t crc, const uint8_t *data, size_t length)
 {
@@ -288,7 +307,8 @@ int gpmon_flash_queue_init(void)
 
     if (s_ready) return 0;
     s_lock = xSemaphoreCreateMutex();
-    if (s_lock == NULL) return -1;
+    s_lfs_lock = xSemaphoreCreateMutex();
+    if (s_lock == NULL || s_lfs_lock == NULL) return -1;
 
     rc = bflb_mtd_open("media", &handle, BFLB_MTD_OPEN_FLAG_BUSADDR);
     if (rc < 0) {
@@ -307,6 +327,10 @@ int gpmon_flash_queue_init(void)
     s_lfs_cfg.prog = lfs_xip_flash_prog;
     s_lfs_cfg.erase = lfs_xip_flash_erase;
     s_lfs_cfg.sync = lfs_xip_flash_sync;
+#ifdef LFS_THREADSAFE
+    s_lfs_cfg.lock = spool_lfs_lock;
+    s_lfs_cfg.unlock = spool_lfs_unlock;
+#endif
 
     s_lfs = &s_lfs_ctx.lfs;
     rc = lfs_mount(s_lfs, &s_lfs_cfg);
