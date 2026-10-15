@@ -12,8 +12,9 @@ on:
 permissions:
   contents: read
 
+# For a given PR, keep only its newest run. Pushes to main have their own group.
 concurrency:
-  group: bl602-build-${{ github.ref }}
+  group: bl602-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,7 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: bouffalolab/bouffalo_sdk
-          ref: 41bf338a57be53919d99f6c6715a96100428c97d
+          ref: 41bf338a57be53919d99f6c6715a96100428c97
           path: bouffalo_sdk
           persist-credentials: false
 
