@@ -75,7 +75,8 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
     slot->flags = record->flags;
     memcpy(slot->payload, record->payload, record->length);
 
-    /* Single producer publishes the fully populated slot last. */
+    /* Publish record bytes before making the slot visible to the sender task. */
+    __sync_synchronize();
     q->head = head + 1u;
     if (used + 1u > q->high_water) q->high_water = used + 1u;
     return true;
@@ -84,10 +85,16 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
 const gpmon_record_t *gpmon_queue_peek(const gpmon_queue_t *q)
 {
     if (q == NULL || q->slots == NULL || q->tail == q->head) return NULL;
+    /* Pair with the producer's publish barrier before reading slot contents. */
+    __sync_synchronize();
     return &q->slots[q->tail % q->capacity];
 }
 
 void gpmon_queue_release(gpmon_queue_t *q)
 {
-    if (q != NULL && q->tail != q->head) q->tail++;
+    if (q != NULL && q->tail != q->head) {
+        /* Ensure the consumer has finished reading before freeing the slot. */
+        __sync_synchronize();
+        q->tail++;
+    }
 }
