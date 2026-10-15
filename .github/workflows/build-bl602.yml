@@ -30,8 +30,8 @@ jobs:
       - name: Checkout Bouffalo SDK
         uses: actions/checkout@v4
         with:
-          repository: bouffalolab/bouffalo_sdk
-          ref: 41bf338a57be53919d99f6c6715a96100428c97d
+          repository: mkp95/bouffalo_sdk
+          ref: 47323386946931d5adb88e358f11b4818b1ed24a
           path: bouffalo_sdk
           persist-credentials: false
 
