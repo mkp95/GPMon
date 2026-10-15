@@ -44,7 +44,7 @@ static void print_memory_stats(void)
     unsigned long alloc_failures = 0ul;
 #endif
 
-    printf("Memory OCRAM: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\\r\\n",
+    printf("Memory OCRAM: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\r\n",
            (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmin_free_size(),
