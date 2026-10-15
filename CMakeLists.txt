@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.15)
 
 find_package(bouffalo_sdk REQUIRED HINTS $ENV{BL_SDK_BASE})
 
+# Track the SDK OCRAM heap low-water mark for runtime memory diagnostics.
+sdk_add_compile_definitions(-DCONFIG_MM_ENABLE_MIN_FREE_TRACKING=1)
+
 sdk_add_include_directories(.)
 sdk_add_include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
 sdk_add_include_directories(
