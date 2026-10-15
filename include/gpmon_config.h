@@ -11,6 +11,8 @@
 #define GPMON_QUEUE_DEPTH             32u
 /* Maximum capture-queue allocation, including record metadata. */
 #define GPMON_CAPTURE_QUEUE_TARGET_BYTES (50u * 1024u)
+/* Begin durable spill before RAM reaches its hard limit. */
+#define GPMON_FLASH_SPILL_THRESHOLD_PERCENT 90u
 /* Keep per-packet console dumps disabled in the latency-sensitive capture task. */
 #define GPMON_VERBOSE_PACKET_LOG       0u
 

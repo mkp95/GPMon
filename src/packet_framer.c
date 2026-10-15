@@ -38,7 +38,14 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
 
     /* Once flash contains older packets, keep newer records in flash until
        that backlog drains. This prevents newer RAM records overtaking it. */
+    uint32_t spill_threshold =
+        (q->capacity * GPMON_FLASH_SPILL_THRESHOLD_PERCENT) / 100u;
+
     if (flash_pending != 0) {
+        queued = gpmon_flash_queue_push(&record) == 0;
+    } else if (flash_status == 0 &&
+               gpmon_queue_count(q) >= spill_threshold) {
+        /* Leave RAM headroom for capture while LittleFS commits records. */
         queued = gpmon_flash_queue_push(&record) == 0;
     } else if (gpmon_queue_push(q, &record)) {
         queued = 1;
@@ -54,7 +61,6 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
         f->stats.bytes_dropped += f->total_length;
         if (f->dropped_before != UINT16_MAX) f->dropped_before++;
     }
-    (void)flash_status;
     f->open = false;
 }
 
