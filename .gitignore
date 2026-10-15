@@ -1,0 +1,35 @@
+# Build outputs
+build/
+build/build_out/
+
+*.o
+*.a
+*.elf
+*.bin
+*.hex
+*.map
+
+# Local SDK/toolchains and environment
+bouffalo_sdk/
+thead_toolchain_min/
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Backups and archives
+*.bak
+*~
+*.zip
+/backups/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Source backups
+*.before_credentials
