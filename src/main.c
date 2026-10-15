@@ -35,20 +35,32 @@ static QueueHandle_t s_tcp_queue;
 static uint32_t s_tcp_queue_drops;
 static UBaseType_t s_tcp_queue_capacity;
 
-static void print_memory_stats(void)
+static unsigned long memory_allocation_failures(void)
 {
 #if CONFIG_MM_ENABLE_STATISTICS
-    unsigned long alloc_failures =
-        (unsigned long)g_mem_manager.stats.total_malloc_failures;
+    return (unsigned long)g_mem_manager.stats.total_malloc_failures;
 #else
-    unsigned long alloc_failures = 0ul;
+    return 0ul;
 #endif
+}
 
-    printf("Memory OCRAM: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\r\n",
+static void print_memory_stats(void)
+{
+    printf("Memory OCRAM: free=%lu min_free=%lu alloc_failures=%lu\\r\\n",
+           (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
+           (unsigned long)kmin_free_size(),
+           memory_allocation_failures());
+}
+
+/* Pool walking for largest-block statistics disables interrupts, so do this
+ * once before the scheduler starts and UART RX interrupts are enabled. */
+static void print_startup_memory_stats(void)
+{
+    printf("Memory OCRAM startup: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\\r\\n",
            (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmin_free_size(),
-           alloc_failures);
+           memory_allocation_failures());
 }
 
 #if GPMON_VERBOSE_PACKET_LOG
@@ -205,6 +217,8 @@ int main(void)
                     NULL) != pdPASS) {
         printf("WARNING: TCP sender task creation failed\r\n");
     }
+
+    print_startup_memory_stats();
 
     vTaskStartScheduler();
 
