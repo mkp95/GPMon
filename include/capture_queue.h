@@ -22,8 +22,8 @@ typedef struct {
 typedef struct {
     gpmon_record_t *slots;
     uint32_t capacity;
-    uint32_t head; /* producer-owned */
-    uint32_t tail; /* consumer-owned */
+    volatile uint32_t head; /* producer publishes; consumer reads */
+    volatile uint32_t tail; /* consumer publishes; producer reads */
     uint32_t high_water; /* producer-owned */
 } gpmon_queue_t;
 

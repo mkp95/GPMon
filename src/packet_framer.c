@@ -1,5 +1,6 @@
 #include "packet_framer.h"
 #include "gpmon_tcp_sender.h"
+#include "gpmon_flash_queue.h"
 #include <string.h>
 
 void gpmon_framer_init(gpmon_framer_t *f)
@@ -31,7 +32,21 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
         f->stats.bytes_truncated += f->total_length - f->length;
     }
 
-    if (gpmon_queue_push(q, &record)) {
+    uint32_t flash_pending = 0;
+    int flash_status = gpmon_flash_queue_pending(&flash_pending);
+    int queued = 0;
+
+    /* Once flash contains older packets, keep newer records in flash until
+       that backlog drains. This prevents newer RAM records overtaking it. */
+    if (flash_pending != 0) {
+        queued = gpmon_flash_queue_push(&record) == 0;
+    } else if (gpmon_queue_push(q, &record)) {
+        queued = 1;
+    } else {
+        queued = gpmon_flash_queue_push(&record) == 0;
+    }
+
+    if (queued) {
         f->stats.packets_queued++;
         f->dropped_before = 0;
     } else {
@@ -39,6 +54,7 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
         f->stats.bytes_dropped += f->total_length;
         if (f->dropped_before != UINT16_MAX) f->dropped_before++;
     }
+    (void)flash_status;
     f->open = false;
 }
 

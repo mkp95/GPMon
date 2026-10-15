@@ -14,6 +14,7 @@
 
 #include "web_config.h"
 #include "gpmon_server_config.h"
+#include "gpmon_flash_queue.h"
 
 void wifi_event_handler(async_input_event_t ev, void *priv);
 
@@ -220,6 +221,10 @@ void wifi_event_handler(async_input_event_t ev, void *priv)
 int gpmon_wifi_provision_start(void)
 {
     bflb_mtd_init();
+
+    if (gpmon_flash_queue_init() != 0) {
+        printf("GPMon: flash outage spool unavailable; RAM-only buffering\\r\\n");
+    }
 
     if (lfs_kv_init() == LFS_KV_OK) {
         s_wifi_storage_ready = 1;

@@ -13,7 +13,5 @@
 #define GPMON_CAPTURE_QUEUE_TARGET_BYTES (50u * 1024u)
 /* Keep per-packet console dumps disabled in the latency-sensitive capture task. */
 #define GPMON_VERBOSE_PACKET_LOG       0u
-/* A small TCP staging queue leaves heap for capture, Wi-Fi and lwIP. */
-#define GPMON_TCP_QUEUE_RECORDS        8u
 
 #endif

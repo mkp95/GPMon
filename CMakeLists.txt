@@ -22,6 +22,7 @@ target_sources(app PRIVATE
     src/wifi_provision.c
     src/gpmon_server_config.c
     src/gpmon_tcp_sender.c
+    src/gpmon_flash_queue.c
     src/web_config.c
 )
 
