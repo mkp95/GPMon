@@ -201,11 +201,21 @@ static uint32_t crc32_bytes(const uint8_t *data, uint16_t length)
 
 static uint64_t packet_epoch(uint64_t packet_us)
 {
+    uint64_t delta_seconds;
+
     if (!s_epoch_valid)
         return 0;
 
-    if (packet_us <= s_uptime_base)
-        return s_epoch_base;
+    /*
+     * s_epoch_base is the server epoch sampled at s_uptime_base.
+     * Queued packets may be older than that sample (especially after an
+     * outage). Subtract their age instead of clamping every old packet to
+     * the same epoch, which would erase timestamp differences in the backlog.
+     */
+    if (packet_us <= s_uptime_base) {
+        delta_seconds = (s_uptime_base - packet_us) / 1000000ull;
+        return delta_seconds > s_epoch_base ? 0 : s_epoch_base - delta_seconds;
+    }
 
     return s_epoch_base + (packet_us - s_uptime_base) / 1000000ull;
 }
