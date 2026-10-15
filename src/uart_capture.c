@@ -31,6 +31,7 @@ static volatile uint32_t s_rx_bytes;
 static volatile uint32_t s_ring_overflows;
 static volatile uint32_t s_uart_errors;
 static uint32_t s_seen_uart_errors;
+static uint32_t s_seen_ring_overflows;
 
 static void rx_ring_push_isr(uint8_t byte, uint32_t time_us_low)
 {
@@ -91,6 +92,7 @@ bool gpmon_uart_capture_init(gpmon_core_t *core)
     s_ring_overflows = 0;
     s_uart_errors = 0;
     s_seen_uart_errors = 0;
+    s_seen_ring_overflows = 0;
 
     gpio = bflb_device_get_by_name("gpio");
     s_uart = bflb_device_get_by_name("uart1");
@@ -147,6 +149,14 @@ void gpmon_uart_capture_poll(void)
         now_us = bflb_mtimer_get_time_us();
         gpmon_core_rx_burst(s_core, &item.byte, 1u,
                             expand_timestamp(item.time_us_low, now_us));
+    }
+
+    /* A software-ring overflow means bytes were lost. Mark the in-flight
+       frame (or the next frame) so downstream consumers can detect possible
+       corruption instead of treating the joined bytes as an intact packet. */
+    if (s_seen_ring_overflows != s_ring_overflows) {
+        s_seen_ring_overflows = s_ring_overflows;
+        gpmon_framer_note_uart_error(&s_core->framer);
     }
 
     if (s_seen_uart_errors != s_uart_errors) {
