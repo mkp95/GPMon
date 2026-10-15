@@ -324,10 +324,10 @@ void gpmon_tcp_sender_task(void *arg)
     while (!gpmon_tcp_sequence_ready() || queue == NULL || queue->slots == NULL)
         vTaskDelay(pdMS_TO_TICKS(100));
 
-    printf("TCP sender device ID: %02X%02X, next sequence=%lu\\r\\n",
+    printf("TCP sender device ID: %02X%02X, next sequence=%lu\r\n",
            s_device_id[0], s_device_id[1],
            (unsigned long)s_next_sequence);
-    printf("TCP sender: consuming shared RAM capture queue; flash is overflow backlog\\r\\n");
+    printf("TCP sender: consuming shared RAM capture queue; flash is overflow backlog\r\n");
 
     for (;;) {
         const gpmon_record_t *queued = gpmon_queue_peek(queue);
@@ -348,7 +348,7 @@ void gpmon_tcp_sender_task(void *arg)
         }
 
         if (record.length == 0 || record.length > GPMON_MAX_PACKET_BYTES) {
-            printf("TCP: invalid queued record; discarding source=%d\\r\\n", source);
+            printf("TCP: invalid queued record; discarding source=%d\r\n", source);
             if (source == 0) gpmon_queue_release(queue);
             else (void)gpmon_flash_queue_ack();
             continue;
@@ -359,7 +359,7 @@ void gpmon_tcp_sender_task(void *arg)
 
         for (;;) {
             if (gpmon_server_config_get(&cfg) != 0 ||
-                cfg.ip[0] == '\\0' || cfg.port == 0) {
+                cfg.ip[0] == '\0' || cfg.port == 0) {
                 close_socket(&fd);
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 continue;
@@ -374,16 +374,16 @@ void gpmon_tcp_sender_task(void *arg)
             if (fd < 0) {
                 fd = connect_server(&cfg);
                 if (fd < 0) {
-                    printf("TCP: connect to %s:%u failed; retrying\\r\\n",
+                    printf("TCP: connect to %s:%u failed; retrying\r\n",
                            cfg.ip, (unsigned)cfg.port);
                     vTaskDelay(pdMS_TO_TICKS(2000));
                     continue;
                 }
 
                 strncpy(connected_ip, cfg.ip, sizeof(connected_ip) - 1);
-                connected_ip[sizeof(connected_ip) - 1] = '\\0';
+                connected_ip[sizeof(connected_ip) - 1] = '\0';
                 connected_port = cfg.port;
-                printf("TCP: connected to %s:%u\\r\\n",
+                printf("TCP: connected to %s:%u\r\n",
                        connected_ip, (unsigned)connected_port);
             }
 
@@ -395,19 +395,19 @@ void gpmon_tcp_sender_task(void *arg)
                     s_epoch_base = server_epoch;
                     s_uptime_base = bflb_mtimer_get_time_us();
                     s_epoch_valid = 1;
-                    printf("TCP: ACK seq=%lu source=%s\\r\\n",
+                    printf("TCP: ACK seq=%lu source=%s\r\n",
                            (unsigned long)record.sequence,
                            source == 0 ? "ram" : "flash");
                     if (source == 0) {
                         gpmon_queue_release(queue);
                     } else if (gpmon_flash_queue_ack() != 0) {
-                        printf("TCP: flash ACK cursor save failed; duplicate replay may occur after reset\\r\\n");
+                        printf("TCP: flash ACK cursor save failed; duplicate replay may occur after reset\r\n");
                     }
                     break;
                 }
             }
 
-            printf("TCP: send/ACK failed for seq=%lu; retrying\\r\\n",
+            printf("TCP: send/ACK failed for seq=%lu; retrying\r\n",
                    (unsigned long)record.sequence);
             close_socket(&fd);
             vTaskDelay(pdMS_TO_TICKS(1000));
