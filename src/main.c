@@ -46,7 +46,7 @@ static unsigned long memory_allocation_failures(void)
 
 static void print_memory_stats(void)
 {
-    printf("Memory OCRAM: free=%lu min_free=%lu alloc_failures=%lu\\r\\n",
+    printf("Memory OCRAM: free=%lu min_free=%lu alloc_failures=%lu\r\n",
            (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmin_free_size(),
            memory_allocation_failures());
