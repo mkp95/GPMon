@@ -56,7 +56,7 @@ static void print_memory_stats(void)
  * once before the scheduler starts and UART RX interrupts are enabled. */
 static void print_startup_memory_stats(void)
 {
-    printf("Memory OCRAM startup: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\\r\\n",
+    printf("Memory OCRAM startup: free=%lu largest_block=%lu min_free=%lu alloc_failures=%lu\r\n",
            (unsigned long)kfree_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
            (unsigned long)kmin_free_size(),
