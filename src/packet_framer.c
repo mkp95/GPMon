@@ -5,7 +5,12 @@
 
 void gpmon_framer_init(gpmon_framer_t *f)
 {
-    if (f != NULL) memset(f, 0, sizeof(*f));
+    gpmon_framer_init_source(f, 1u);
+}
+
+void gpmon_framer_init_source(gpmon_framer_t *f, uint8_t source_id)
+{
+    if (f != NULL) { memset(f, 0, sizeof(*f)); f->source_id = source_id; }
 }
 
 static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
@@ -13,6 +18,7 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
     gpmon_record_t record;
     memset(&record, 0, sizeof(record));
     record.first_byte_us = f->first_byte_us;
+    record.source_id = f->source_id;
     if (gpmon_tcp_sequence_next(&record.sequence) != 0) {
         f->stats.packets_dropped++;
         f->stats.bytes_dropped += f->total_length;
@@ -32,26 +38,10 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
         f->stats.bytes_truncated += f->total_length - f->length;
     }
 
-    uint32_t flash_pending = 0;
-    int flash_status = gpmon_flash_queue_pending(&flash_pending);
-    int queued = 0;
-
-    /* Once flash contains older packets, keep newer records in flash until
-       that backlog drains. This prevents newer RAM records overtaking it. */
-    uint32_t spill_threshold =
-        (q->capacity * GPMON_FLASH_SPILL_THRESHOLD_PERCENT) / 100u;
-
-    if (flash_pending != 0) {
-        queued = gpmon_flash_queue_push(&record) == 0;
-    } else if (flash_status == 0 &&
-               gpmon_queue_count(q) >= spill_threshold) {
-        /* Leave RAM headroom for capture while LittleFS commits records. */
-        queued = gpmon_flash_queue_push(&record) == 0;
-    } else if (gpmon_queue_push(q, &record)) {
-        queued = 1;
-    } else {
-        queued = gpmon_flash_queue_push(&record) == 0;
-    }
+    /* New records stay in RAM while space remains. A separate task moves
+       the oldest records to flash, preserving one global FIFO. */
+    queued = gpmon_queue_push(q, &record) ? 1 : 0;
+    if (!queued) queued = gpmon_flash_queue_push(&record) == 0;
 
     if (queued) {
         f->stats.packets_queued++;
