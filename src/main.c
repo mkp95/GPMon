@@ -190,6 +190,15 @@ int main(void)
         printf("WARNING: Wi-Fi provisioning unavailable; UART capture will continue\r\n");
     }
 
+    if (xTaskCreate(gpmon_flash_queue_spill_task,
+                    "gpmon_spill",
+                    1024,
+                    &s_core.queue,
+                    10,
+                    NULL) != pdPASS) {
+        printf("WARNING: flash FIFO spill task creation failed\\r\\n");
+    }
+
     if (xTaskCreate(gpmon_tcp_sender_task,
                     "gpmon_tcp",
                     2048,
