@@ -341,7 +341,7 @@ void gpmon_tcp_sender_task(void *arg)
 
     for (;;) {
         uint32_t flash_pending = 0;
-        int pending_rc = gpmon_flash_queue_pending(&flash_pending);
+        (void)gpmon_flash_queue_pending(&flash_pending);
         int source = 0; /* 0 = RAM queue, 1 = flash spool */
 
         /* Flash always contains older records than RAM while the spill
@@ -370,7 +370,7 @@ void gpmon_tcp_sender_task(void *arg)
 
         int retry_select = 0;
         for (;;) {
-            if (gpmon_server_config_get(&cfg) != 0 ||
+            if (gpmon_server_config_get(&cfg) < 0 ||
                 cfg.ip[0] == '\0' || cfg.port == 0) {
                 close_socket(&fd);
                 if (source == 0) gpmon_queue_cancel_claim(queue);
