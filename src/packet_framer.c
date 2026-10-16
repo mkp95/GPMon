@@ -41,7 +41,8 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
     /* New records stay in RAM while space remains. A separate task moves
        the oldest records to flash, preserving one global FIFO. */
     queued = gpmon_queue_push(q, &record) ? 1 : 0;
-    if (!queued) queued = gpmon_flash_queue_push(&record) == 0;
+    /* Do not append a newer record directly to flash: the spill worker may
+       still be transferring an older RAM head. A full queue is counted below. */
 
     if (queued) {
         f->stats.packets_queued++;
