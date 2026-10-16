@@ -38,6 +38,7 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
         f->stats.bytes_truncated += f->total_length - f->length;
     }
 
+    int queued;
     /* New records stay in RAM while space remains. A separate task moves
        the oldest records to flash, preserving one global FIFO. */
     queued = gpmon_queue_push(q, &record) ? 1 : 0;
