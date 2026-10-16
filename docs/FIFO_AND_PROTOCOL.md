@@ -18,14 +18,14 @@
 
 ## Automatic and manual receiver selection
 
-The default mode is automatic. It uses the current Wi-Fi station gateway address as the server IP and port 9100. The gateway is resolved on each sender selection, so a Wi-Fi AP/gateway change updates the destination.
+Open `/serverconfig` on the device's web server for a mode selector and manual IP/port form. The default mode is automatic. It uses the current Wi-Fi station gateway address as the server IP and port 9100. The gateway is resolved on each sender selection, so a Wi-Fi AP/gateway change updates the destination.
 
 - `GET /serverget` reports the effective `ip`, `port`, and `mode`.
 - `GET /serverset?mode=auto` persists automatic gateway mode.
 - `GET /serverset?mode=manual&ip=192.168.1.50&port=9100` persists a manual receiver.
 - For compatibility with the existing manual settings form, omitting `mode` while supplying `ip` and `port` also saves manual mode.
 
-The repository contains the CGI handlers but not the HTML/JavaScript asset that renders the Wi-Fi dashboard. Therefore the automatic/manual selection API is implemented here, but a visible mode selector must be added to the dashboard asset supplied by the SDK/build environment if it is not already customizable there.
+The mode selector is served by the firmware at `/serverconfig`; the SDK's existing Wi-Fi setup page remains unchanged.
 
 ## Delivery semantics
 
