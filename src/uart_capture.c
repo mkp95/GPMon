@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define RX_RING_SIZE 512u
 #define RX_RING_MASK (RX_RING_SIZE - 1u)
@@ -148,8 +149,15 @@ bool gpmon_uart_capture_init(gpmon_core_t *core)
     gpio = bflb_device_get_by_name("gpio");
     if (gpio == NULL) return false;
     /* UART1 is initialized first and always serviced first by the poller. */
-    if (init_port(gpio, &s_ports[0], 0u) != 0) return false;
-    if (init_port(gpio, &s_ports[1], 1u) != 0) return false;
+    if (init_port(gpio, &s_ports[0], 0u) != 0) {
+        printf("GPMon: main-board UART1 init failed\\r\\n");
+        return false;
+    }
+    if (init_port(gpio, &s_ports[1], 1u) != 0) {
+        /* UART1 is critical; a missing daughter UART must not disable it. */
+        s_ports[1].uart = NULL;
+        printf("GPMon: daughter UART0 init failed; continuing with UART1\\r\\n");
+    }
     return true;
 }
 
@@ -165,7 +173,8 @@ static uint64_t expand_timestamp(uint32_t low, uint64_t now_us)
 
 static void poll_port(uart_port_t *port)
 {
-    for (;;) {
+    uint32_t processed = 0;
+    for (; processed < 128u; processed++) {
         uint32_t tail = port->tail;
         rx_item_t item;
         if (tail == port->head) break;
