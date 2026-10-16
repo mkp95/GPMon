@@ -605,7 +605,7 @@ void gpmon_flash_queue_spill_task(void *arg)
                              ? queue->capacity : GPMON_FLASH_SPILL_THRESHOLD_RECORDS;
         uint32_t count = gpmon_queue_count(queue);
 
-        if (count != 0u && (count >= threshold || pending != 0u)) {
+        if (count != 0u && count >= threshold) {
             gpmon_record_t record;
             if (gpmon_queue_claim_head(queue, &record)) {
                 if (gpmon_flash_queue_push(&record) == 0) {
