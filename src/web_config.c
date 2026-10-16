@@ -339,6 +339,31 @@ cleanup:
 }
 
 
+static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[])
+{
+    static const char page[] =
+        "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>GPMon Server</title><style>body{font:16px sans-serif;max-width:560px;margin:2rem auto;padding:0 1rem}"
+        "label{display:block;margin:.8rem 0}input,select,button{font:inherit;padding:.5rem;width:100%;box-sizing:border-box}"
+        "button{margin-top:1rem}#manual{padding:.5rem;background:#f3f4f6}#status{white-space:pre-wrap}</style></head><body>"
+        "<h1>GPMon server settings</h1><p>Automatic mode uses the current Wi-Fi gateway on port 9100.</p>"
+        "<label>Mode<select id='mode' onchange='showManual()'><option value='auto'>Automatic (Wi-Fi gateway)</option>"
+        "<option value='manual'>Manual server IP</option></select></label>"
+        "<div id='manual'><label>Server IPv4 address<input id='ip' inputmode='decimal' placeholder='192.168.1.50'></label>"
+        "<label>Port<input id='port' type='number' min='1' max='65535' value='9100'></label></div>"
+        "<button onclick='save()'>Save settings</button><p id='status'>Loading settings...</p>"
+        "<script>function showManual(){document.getElementById('manual').style.display=document.getElementById('mode').value==='manual'?'block':'none'}"
+        "async function load(){try{let r=await fetch('/serverget');let d=await r.json();document.getElementById('mode').value=d.mode||'auto';"
+        "document.getElementById('ip').value=d.ip||'';document.getElementById('port').value=d.port||9100;"
+        "document.getElementById('status').textContent='Current mode: '+(d.mode||'auto')+'\\nEffective destination: '+(d.ip||'(waiting for Wi-Fi gateway)')+':'+(d.port||9100);showManual()}"
+        "catch(e){document.getElementById('status').textContent='Could not load settings: '+e}}"
+        "async function save(){let m=document.getElementById('mode').value;let q=m==='auto'?'mode=auto':'mode=manual&ip='+encodeURIComponent(document.getElementById('ip').value)+'&port='+encodeURIComponent(document.getElementById('port').value);"
+        "try{let r=await fetch('/serverset?'+q);let d=await r.json();document.getElementById('status').textContent=d.message||d.error||JSON.stringify(d);if(d.ok)load()}"
+        "catch(e){document.getElementById('status').textContent='Save failed: '+e}}load();</script></body></html>";
+    (void)idx; (void)num; (void)param; (void)val;
+    return page;
+}
+
 static const char *cgi_serverget(int idx, int num, char *param[], char *val[])
 {
     gpmon_server_config_t config;
@@ -448,6 +473,7 @@ static const tCGI cgi_handlers[] = {
     {"/wifiscan", cgi_scan},
     {"/wificonfig", cgi_connect},
     {"/wifiget", cgi_status},
+    {"/serverconfig", cgi_serverconfig},
     {"/serverget", cgi_serverget},
     {"/serverset", cgi_serverset},
     {"/gpmonlive", cgi_gpmonlive},
