@@ -1,0 +1,92 @@
+name: BL602 build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# For a given PR, keep only its newest run. Pushes to main have their own group.
+concurrency:
+  group: bl602-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build GPMon_v1 (BL602)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout GPMon_v1
+        uses: actions/checkout@v4
+
+      - name: Checkout Bouffalo SDK
+        uses: actions/checkout@v4
+        with:
+          repository: mkp95/bouffalo_sdk
+          ref: 47323386946931d5adb88e358f11b4818b1ed24a
+          path: bouffalo_sdk
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential cmake ninja-build make python3 python3-pip \
+            python3-setuptools python3-wheel xz-utils ca-certificates \
+            libncurses-dev
+          python3 -m pip install --user pyelftools
+
+      - name: Install T-Head RISC-V toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/xuantie-gcc-riscv-v2.6.1-linux-x86_64.tar.xz"
+          url="https://github.com/bouffalolab/toolchain/releases/download/default/xuantie-gcc-riscv-v2.6.1-linux-x86_64.tar.xz"
+          curl --fail --location --retry 3 "$url" --output "$archive"
+          echo "83817bd7cab693fc249bb98869de5e475c1ede577f4a188869fed96c8dbb8e1a  $archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/xuantie-toolchain"
+          tar -xJf "$archive" -C "$RUNNER_TEMP/xuantie-toolchain"
+          gcc_path="$(find "$RUNNER_TEMP/xuantie-toolchain" -type f -name 'riscv64-unknown-elf-gcc' -print -quit)"
+          if [ -z "$gcc_path" ]; then
+            echo "Could not locate riscv64-unknown-elf-gcc in toolchain archive" >&2
+            find "$RUNNER_TEMP/xuantie-toolchain" -maxdepth 4 -type f -name '*gcc*' | head -50
+            exit 1
+          fi
+          echo "$(dirname "$gcc_path")" >> "$GITHUB_PATH"
+          "$(dirname "$gcc_path")/riscv64-unknown-elf-gcc" --version
+
+      - name: Build BL602 firmware
+        env:
+          BL_SDK_BASE: ${{ github.workspace }}/bouffalo_sdk
+        run: |
+          set -o pipefail
+          make CHIP=bl602 BOARD=bl602dk 2>&1 | tee "$RUNNER_TEMP/gpmon-build.log"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpmon-bl602-build-log
+          path: ${{ runner.temp }}/gpmon-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload firmware build outputs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpmon-bl602-firmware
+          path: |
+            build/build_out/*.elf
+            build/build_out/*.bin
+            build/build_out/*.map
+          if-no-files-found: error
+          retention-days: 14

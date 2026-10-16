@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 
+# Apply this to both SDK components (including mm.c) and GPMon application code.
+add_compile_definitions(CONFIG_MM_ENABLE_MIN_FREE_TRACKING=1)
+
 find_package(bouffalo_sdk REQUIRED HINTS $ENV{BL_SDK_BASE})
 
 sdk_add_include_directories(.)
@@ -19,6 +22,7 @@ target_sources(app PRIVATE
     src/wifi_provision.c
     src/gpmon_server_config.c
     src/gpmon_tcp_sender.c
+    src/gpmon_flash_queue.c
     src/web_config.c
 )
 

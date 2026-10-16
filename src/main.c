@@ -1,4 +1,5 @@
 #include "board.h"
+#include "mm.h"
 #include "bflb_mtimer.h"
 #include "gpmon_core.h"
 #include "uart_capture.h"
@@ -6,10 +7,10 @@
 #include "wifi_provision.h"
 #include "web_config.h"
 #include "gpmon_tcp_sender.h"
+#include "gpmon_flash_queue.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include "queue.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -30,9 +31,43 @@ int bl_rand(void)
 
 
 static gpmon_core_t s_core;
-static QueueHandle_t s_tcp_queue;
-static uint32_t s_tcp_queue_drops;
-static UBaseType_t s_tcp_queue_capacity;
+static size_t s_min_free_ocram;
+
+static unsigned long memory_allocation_failures(void)
+{
+#if CONFIG_MM_ENABLE_STATISTICS
+    return (unsigned long)g_mem_manager.stats.total_malloc_failures;
+#else
+    return 0ul;
+#endif
+}
+
+static void print_memory_stats(void)
+{
+    size_t free_bytes = kfree_size(MM_HEAP_OCRAM_0);
+
+    if (s_min_free_ocram == 0u || free_bytes < s_min_free_ocram) {
+        s_min_free_ocram = free_bytes;
+    }
+
+    printf("Memory OCRAM: free=%lu min_observed_free=%lu alloc_failures=%lu\r\n",
+           (unsigned long)free_bytes,
+           (unsigned long)s_min_free_ocram,
+           memory_allocation_failures());
+}
+
+/* Pool walking for largest-block statistics disables interrupts, so do this
+ * once before the scheduler starts and UART RX interrupts are enabled. */
+static void print_startup_memory_stats(void)
+{
+    size_t free_bytes = kfree_size(MM_HEAP_OCRAM_0);
+
+    s_min_free_ocram = free_bytes;
+    printf("Memory OCRAM startup: free=%lu largest_block=%lu alloc_failures=%lu\r\n",
+           (unsigned long)free_bytes,
+           (unsigned long)kmax_free_size(MM_HEAP_OCRAM_0),
+           memory_allocation_failures());
+}
 
 #if GPMON_VERBOSE_PACKET_LOG
 static void print_packet(const gpmon_record_t *record)
@@ -96,38 +131,23 @@ static void uart_capture_task(void *arg)
     next_stats_us = bflb_mtimer_get_time_us() + 1000000ull;
 
     for (;;) {
-        const gpmon_record_t *record;
         gpmon_uart_capture_stats_t stats;
 
+        /* The sender owns the single RAM backlog. Never drain it here:
+           unacknowledged records remain queued until TCP ACK or flash spill. */
         gpmon_uart_capture_poll();
-
-        while ((record = gpmon_uart_capture_peek()) != NULL) {
-            /* Keep capture-task work bounded; verbose dumps can starve RX-ring draining. */
-#if GPMON_VERBOSE_PACKET_LOG
-            print_packet(record);
-#endif
-            web_config_publish_packet(record);
-
-            if (s_tcp_queue != NULL &&
-                xQueueSend(s_tcp_queue, record, 0) != pdPASS) {
-                s_tcp_queue_drops++;
-                if ((s_tcp_queue_drops % 10u) == 1u) {
-                    printf("TCP queue full; sender-copy drops=%lu\r\n",
-                           (unsigned long)s_tcp_queue_drops);
-                }
-            }
-
-            gpmon_uart_capture_release();
-        }
 
         if (bflb_mtimer_get_time_us() >= next_stats_us) {
             gpmon_uart_capture_get_stats(&stats);
             web_config_publish_stats(&stats,
                                      gpmon_queue_count(&s_core.queue),
                                      gpmon_queue_high_water(&s_core.queue));
+            uint32_t flash_pending = 0;
+            (void)gpmon_flash_queue_pending(&flash_pending);
             printf("UART stats: rx_bytes=%lu ring_overflows=%lu uart_errors=%lu "
                    "capture_queue=%lu/%lu high_water=%lu capture_bytes=%lu "
-                   "capture_drops=%lu tcp_drops=%lu\r\n",
+                   "capture_drops=%lu flash_pending=%lu flash_used=%lu "
+                   "flash_write_failures=%lu flash_corrupt=%lu\r\n",
                    (unsigned long)stats.rx_bytes,
                    (unsigned long)stats.rx_ring_overflows,
                    (unsigned long)stats.uart_error_events,
@@ -136,7 +156,11 @@ static void uart_capture_task(void *arg)
                    (unsigned long)gpmon_queue_high_water(&s_core.queue),
                    (unsigned long)(s_core.queue.capacity * sizeof(gpmon_record_t)),
                    (unsigned long)s_core.framer.stats.packets_dropped,
-                   (unsigned long)s_tcp_queue_drops);
+                   (unsigned long)flash_pending,
+                   (unsigned long)gpmon_flash_queue_used_bytes(),
+                   (unsigned long)gpmon_flash_queue_write_failures(),
+                   (unsigned long)gpmon_flash_queue_corrupt_records());
+            print_memory_stats();
             next_stats_us += 1000000ull;
         }
 
@@ -149,18 +173,6 @@ int main(void)
     board_init();
 
     printf("\r\nGPMon_v1 starting FreeRTOS\r\n");
-
-    /* A deliberately small staging queue avoids competing with the capture
-       queue for most of the FreeRTOS heap. The sender remains a separate task. */
-    s_tcp_queue = xQueueCreate(GPMON_TCP_QUEUE_RECORDS, sizeof(gpmon_record_t));
-    s_tcp_queue_capacity = s_tcp_queue != NULL ? GPMON_TCP_QUEUE_RECORDS : 0;
-    if (s_tcp_queue == NULL) {
-        printf("WARNING: TCP backlog unavailable; UART capture will continue\r\n");
-    } else {
-        printf("TCP RAM backlog: capacity=%lu records (%lu bytes)\r\n",
-               (unsigned long)s_tcp_queue_capacity,
-               (unsigned long)(s_tcp_queue_capacity * sizeof(gpmon_record_t)));
-    }
 
     if (xTaskCreate(uart_capture_task,
                     "uart_capture",
@@ -178,15 +190,16 @@ int main(void)
         printf("WARNING: Wi-Fi provisioning unavailable; UART capture will continue\r\n");
     }
 
-    if (s_tcp_queue != NULL &&
-        xTaskCreate(gpmon_tcp_sender_task,
+    if (xTaskCreate(gpmon_tcp_sender_task,
                     "gpmon_tcp",
                     2048,
-                    s_tcp_queue,
+                    &s_core.queue,
                     8,
                     NULL) != pdPASS) {
         printf("WARNING: TCP sender task creation failed\r\n");
     }
+
+    print_startup_memory_stats();
 
     vTaskStartScheduler();
 

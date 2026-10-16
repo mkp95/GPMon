@@ -1,48 +1,41 @@
 #include "capture_queue.h"
 #include "FreeRTOS.h"
-#include "task.h"
 #include <string.h>
 
 _Static_assert(GPMON_MAX_PACKET_BYTES > 0u,
                "maximum packet size must be positive");
 
 /*
- * Keep a reserve for Wi-Fi/TCP activity and task/runtime allocations. This
- * queue is created from the UART task after the system's other tasks exist.
+ * The selected FreeRTOS heap_3 allocator delegates to libc malloc/free and
+ * does not provide xPortGetFreeHeapSize(). Bound the request to the configured
+ * target and fall back in smaller steps if the allocator cannot satisfy it.
+ * This is best-effort: heap_3 exposes no portable free-heap query, so a fixed
+ * reserve cannot be measured or guaranteed here.
  */
-#define GPMON_QUEUE_HEAP_RESERVE_BYTES (16u * 1024u)
-#define GPMON_QUEUE_HEAP_FRACTION_NUM  60u
-#define GPMON_QUEUE_HEAP_FRACTION_DEN  100u
-
 bool gpmon_queue_init(gpmon_queue_t *q)
 {
-    size_t free_bytes, budget, target_bytes;
+    size_t target_bytes;
     uint32_t capacity;
 
     if (q == NULL) return false;
     memset(q, 0, sizeof(*q));
 
-    free_bytes = (size_t)xPortGetFreeHeapSize();
-    if (free_bytes <= GPMON_QUEUE_HEAP_RESERVE_BYTES) return false;
-
-    budget = free_bytes - GPMON_QUEUE_HEAP_RESERVE_BYTES;
-    target_bytes = (budget * GPMON_QUEUE_HEAP_FRACTION_NUM) /
-                   GPMON_QUEUE_HEAP_FRACTION_DEN;
-    /* The requested 50 KiB includes metadata, not payload bytes alone. */
-    if (target_bytes > GPMON_CAPTURE_QUEUE_TARGET_BYTES)
-        target_bytes = GPMON_CAPTURE_QUEUE_TARGET_BYTES;
+    /* Includes record metadata, not just packet payload bytes. */
+    target_bytes = GPMON_CAPTURE_QUEUE_TARGET_BYTES;
     capacity = (uint32_t)(target_bytes / sizeof(gpmon_record_t));
     if (capacity < GPMON_QUEUE_DEPTH) return false;
 
-    /* Be defensive against heap fragmentation and allocator overhead. */
     while (capacity >= GPMON_QUEUE_DEPTH) {
-        q->slots = (gpmon_record_t *)pvPortMalloc(
-            (size_t)capacity * sizeof(gpmon_record_t));
+        size_t allocation_bytes = (size_t)capacity * sizeof(gpmon_record_t);
+
+        q->slots = (gpmon_record_t *)pvPortMalloc(allocation_bytes);
         if (q->slots != NULL) {
             q->capacity = capacity;
-            memset(q->slots, 0, (size_t)capacity * sizeof(gpmon_record_t));
+            memset(q->slots, 0, allocation_bytes);
             return true;
         }
+
+        /* Retry at 75% of the previous size after an allocation failure. */
         capacity = (capacity * 3u) / 4u;
     }
 
@@ -82,7 +75,8 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
     slot->flags = record->flags;
     memcpy(slot->payload, record->payload, record->length);
 
-    /* Single producer publishes the fully populated slot last. */
+    /* Publish record bytes before making the slot visible to the sender task. */
+    __sync_synchronize();
     q->head = head + 1u;
     if (used + 1u > q->high_water) q->high_water = used + 1u;
     return true;
@@ -91,10 +85,16 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
 const gpmon_record_t *gpmon_queue_peek(const gpmon_queue_t *q)
 {
     if (q == NULL || q->slots == NULL || q->tail == q->head) return NULL;
+    /* Pair with the producer's publish barrier before reading slot contents. */
+    __sync_synchronize();
     return &q->slots[q->tail % q->capacity];
 }
 
 void gpmon_queue_release(gpmon_queue_t *q)
 {
-    if (q != NULL && q->tail != q->head) q->tail++;
+    if (q != NULL && q->tail != q->head) {
+        /* Ensure the consumer has finished reading before freeing the slot. */
+        __sync_synchronize();
+        q->tail++;
+    }
 }
