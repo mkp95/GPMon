@@ -19,6 +19,7 @@ static void close_packet(gpmon_framer_t *f, gpmon_queue_t *q)
     memset(&record, 0, sizeof(record));
     record.first_byte_us = f->first_byte_us;
     record.source_id = f->source_id;
+    record.source_id_valid = 0xA5u;
     if (gpmon_tcp_sequence_next(&record.sequence) != 0) {
         f->stats.packets_dropped++;
         f->stats.bytes_dropped += f->total_length;
