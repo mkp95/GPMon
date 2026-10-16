@@ -18,6 +18,7 @@ typedef struct {
     uint8_t flags;
     uint8_t payload[GPMON_MAX_PACKET_BYTES];
     uint8_t source_id; /* 0 = daughter UART0, 1 = main-board UART1; uses tail padding */
+    uint8_t source_id_valid; /* marker distinguishes new records from legacy flash entries */
 } gpmon_record_t;
 
 typedef struct {
