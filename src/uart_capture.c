@@ -9,9 +9,13 @@
 
 #include <stddef.h>
 #include <string.h>
+#include <stdint.h>
 
 #define RX_RING_SIZE 512u
 #define RX_RING_MASK (RX_RING_SIZE - 1u)
+#define UART_PORT_COUNT 2u
+#define UART0_RX_PIN 7u
+#define UART0_TX_PIN 16u
 
 #if (RX_RING_SIZE & RX_RING_MASK) != 0
 #error "RX_RING_SIZE must be a power of two"
@@ -22,86 +26,91 @@ typedef struct {
     uint8_t byte;
 } rx_item_t;
 
-static struct bflb_device_s *s_uart;
+typedef struct {
+    struct bflb_device_s *uart;
+    rx_item_t ring[RX_RING_SIZE];
+    volatile uint32_t head;
+    volatile uint32_t tail;
+    volatile uint32_t rx_bytes;
+    volatile uint32_t ring_overflows;
+    volatile uint32_t uart_errors;
+    uint32_t seen_uart_errors;
+    uint32_t seen_ring_overflows;
+    uint8_t source_id;
+    uint8_t rx_pin;
+    uint8_t tx_pin;
+    uint8_t rx_func;
+    uint8_t tx_func;
+    gpmon_framer_t *framer;
+} uart_port_t;
+
 static gpmon_core_t *s_core;
-static rx_item_t s_rx_ring[RX_RING_SIZE];
-static volatile uint32_t s_rx_head;
-static volatile uint32_t s_rx_tail;
-static volatile uint32_t s_rx_bytes;
-static volatile uint32_t s_ring_overflows;
-static volatile uint32_t s_uart_errors;
-static uint32_t s_seen_uart_errors;
-static uint32_t s_seen_ring_overflows;
+static gpmon_framer_t s_uart0_framer;
+static uart_port_t s_ports[UART_PORT_COUNT] = {
+    { .source_id = 1u, .rx_pin = GPMON_UART_RX_PIN,
+      .tx_pin = GPMON_UART_TX_PIN,
+      .rx_func = GPIO_UART_FUNC_UART1_RX,
+      .tx_func = GPIO_UART_FUNC_UART1_TX },
+    { .source_id = 0u, .rx_pin = UART0_RX_PIN,
+      .tx_pin = UART0_TX_PIN,
+      .rx_func = GPIO_UART_FUNC_UART0_RX,
+      .tx_func = GPIO_UART_FUNC_UART0_TX }
+};
 
-static void rx_ring_push_isr(uint8_t byte, uint32_t time_us_low)
+static void rx_ring_push_isr(uart_port_t *port, uint8_t byte,
+                             uint32_t time_us_low)
 {
-    uint32_t head = s_rx_head;
+    uint32_t head = port->head;
     uint32_t next = (head + 1u) & RX_RING_MASK;
-
-    if (next == s_rx_tail) {
-        s_ring_overflows++;
+    if (next == port->tail) {
+        port->ring_overflows++;
         return;
     }
-
-    s_rx_ring[head].byte = byte;
-    s_rx_ring[head].time_us_low = time_us_low;
-    /* Publish head only after the item contents are written. */
-    s_rx_head = next;
-    s_rx_bytes++;
+    port->ring[head].byte = byte;
+    port->ring[head].time_us_low = time_us_low;
+    __sync_synchronize();
+    port->head = next;
+    port->rx_bytes++;
 }
 
-static void uart1_isr(int irq, void *arg)
+static void uart_isr(int irq, void *arg)
 {
+    uintptr_t port_index = (uintptr_t)arg;
+    uart_port_t *port;
     uint32_t status;
     (void)irq;
-    (void)arg;
+    if (port_index >= UART_PORT_COUNT) return;
+    port = &s_ports[port_index];
+    if (port->uart == NULL) return;
 
-    status = bflb_uart_get_intstatus(s_uart);
-
+    status = bflb_uart_get_intstatus(port->uart);
     if (status & (UART_INTSTS_RX_FIFO | UART_INTSTS_RTO)) {
-        while (bflb_uart_rxavailable(s_uart)) {
-            uint8_t byte = (uint8_t)bflb_uart_getchar(s_uart);
+        while (bflb_uart_rxavailable(port->uart)) {
+            uint8_t byte = (uint8_t)bflb_uart_getchar(port->uart);
             uint32_t timestamp = (uint32_t)bflb_mtimer_get_time_us();
-            rx_ring_push_isr(byte, timestamp);
+            rx_ring_push_isr(port, byte, timestamp);
         }
     }
-
-    if (status & UART_INTSTS_RTO) {
-        bflb_uart_int_clear(s_uart, UART_INTCLR_RTO);
-    }
-
+    if (status & UART_INTSTS_RTO)
+        bflb_uart_int_clear(port->uart, UART_INTCLR_RTO);
     if (status & (UART_INTSTS_PCE | UART_INTSTS_TX_FER | UART_INTSTS_RX_FER)) {
-        s_uart_errors++;
-        if (status & UART_INTSTS_PCE) {
-            bflb_uart_int_clear(s_uart, UART_INTCLR_PCE);
-        }
+        port->uart_errors++;
+        if (status & UART_INTSTS_PCE)
+            bflb_uart_int_clear(port->uart, UART_INTCLR_PCE);
     }
 }
 
-bool gpmon_uart_capture_init(gpmon_core_t *core)
+static int init_port(struct bflb_device_s *gpio, uart_port_t *port,
+                     uint32_t index)
 {
-    struct bflb_device_s *gpio;
     struct bflb_uart_config_s cfg;
+    char name[8];
+    (void)name;
+    port->uart = bflb_device_get_by_name(index == 0u ? "uart1" : "uart0");
+    if (port->uart == NULL) return -1;
 
-    if (core == NULL) return false;
-
-    s_core = core;
-    s_rx_head = 0;
-    s_rx_tail = 0;
-    s_rx_bytes = 0;
-    s_ring_overflows = 0;
-    s_uart_errors = 0;
-    s_seen_uart_errors = 0;
-    s_seen_ring_overflows = 0;
-
-    gpio = bflb_device_get_by_name("gpio");
-    s_uart = bflb_device_get_by_name("uart1");
-    if (gpio == NULL || s_uart == NULL) return false;
-
-    /* Use the requested UART1 pin mapping, independent of board defaults. */
-    bflb_gpio_uart_init(gpio, GPMON_UART_RX_PIN, GPIO_UART_FUNC_UART1_RX);
-    bflb_gpio_uart_init(gpio, GPMON_UART_TX_PIN, GPIO_UART_FUNC_UART1_TX);
-
+    bflb_gpio_uart_init(gpio, port->rx_pin, port->rx_func);
+    bflb_gpio_uart_init(gpio, port->tx_pin, port->tx_func);
     memset(&cfg, 0, sizeof(cfg));
     cfg.baudrate = GPMON_UART_BAUD;
     cfg.direction = UART_DIRECTION_TXRX;
@@ -112,60 +121,80 @@ bool gpmon_uart_capture_init(gpmon_core_t *core)
     cfg.tx_fifo_threshold = 7;
     cfg.rx_fifo_threshold = 1;
     cfg.bit_order = UART_LSB_FIRST;
-    bflb_uart_init(s_uart, &cfg);
+    bflb_uart_init(port->uart, &cfg);
 
-    /* Install the handler before enabling RX interrupts. */
-    bflb_uart_rxint_mask(s_uart, true);
-    bflb_irq_attach(s_uart->irq_num, uart1_isr, NULL);
-    bflb_irq_enable(s_uart->irq_num);
-    bflb_uart_rxint_mask(s_uart, false);
+    bflb_uart_rxint_mask(port->uart, true);
+    bflb_irq_attach(port->uart->irq_num, uart_isr, (void *)(uintptr_t)index);
+    bflb_irq_enable(port->uart->irq_num);
+    bflb_uart_rxint_mask(port->uart, false);
+    return 0;
+}
+
+bool gpmon_uart_capture_init(gpmon_core_t *core)
+{
+    struct bflb_device_s *gpio;
+    if (core == NULL || core->queue.slots == NULL) return false;
+    s_core = core;
+    memset(&s_uart0_framer, 0, sizeof(s_uart0_framer));
+    gpmon_framer_init_source(&s_core->framer, 1u);
+    gpmon_framer_init_source(&s_uart0_framer, 0u);
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        s_ports[i].head = s_ports[i].tail = 0;
+        s_ports[i].rx_bytes = s_ports[i].ring_overflows = 0;
+        s_ports[i].uart_errors = 0;
+        s_ports[i].seen_uart_errors = s_ports[i].seen_ring_overflows = 0;
+        s_ports[i].framer = i == 0u ? &s_core->framer : &s_uart0_framer;
+    }
+    gpio = bflb_device_get_by_name("gpio");
+    if (gpio == NULL) return false;
+    /* UART1 is initialized first and always serviced first by the poller. */
+    if (init_port(gpio, &s_ports[0], 0u) != 0) return false;
+    if (init_port(gpio, &s_ports[1], 1u) != 0) return false;
     return true;
 }
 
 static uint64_t expand_timestamp(uint32_t low, uint64_t now_us)
 {
     uint64_t candidate = (now_us & 0xFFFFFFFF00000000ull) | low;
-    if (candidate > now_us && candidate - now_us > 0x80000000ull) {
+    if (candidate > now_us && candidate - now_us > 0x80000000ull)
         candidate -= 0x100000000ull;
-    } else if (now_us > candidate && now_us - candidate > 0x80000000ull) {
+    else if (now_us > candidate && now_us - candidate > 0x80000000ull)
         candidate += 0x100000000ull;
-    }
     return candidate;
+}
+
+static void poll_port(uart_port_t *port)
+{
+    for (;;) {
+        uint32_t tail = port->tail;
+        rx_item_t item;
+        if (tail == port->head) break;
+        __sync_synchronize();
+        item = port->ring[tail];
+        port->tail = (tail + 1u) & RX_RING_MASK;
+        gpmon_framer_feed(port->framer, &s_core->queue, &item.byte, 1u,
+                          expand_timestamp(item.time_us_low,
+                                           bflb_mtimer_get_time_us()));
+    }
+    if (port->seen_ring_overflows != port->ring_overflows) {
+        port->seen_ring_overflows = port->ring_overflows;
+        gpmon_framer_note_uart_error(port->framer);
+    }
+    if (port->seen_uart_errors != port->uart_errors) {
+        uint32_t delta = port->uart_errors - port->seen_uart_errors;
+        while (delta--) gpmon_framer_note_uart_error(port->framer);
+        port->seen_uart_errors = port->uart_errors;
+    }
+    gpmon_framer_tick(port->framer, &s_core->queue,
+                      bflb_mtimer_get_time_us());
 }
 
 void gpmon_uart_capture_poll(void)
 {
     if (s_core == NULL) return;
-
-    for (;;) {
-        uint32_t tail = s_rx_tail;
-        rx_item_t item;
-        uint64_t now_us;
-
-        if (tail == s_rx_head) break;
-        item = s_rx_ring[tail];
-        s_rx_tail = (tail + 1u) & RX_RING_MASK;
-
-        now_us = bflb_mtimer_get_time_us();
-        gpmon_core_rx_burst(s_core, &item.byte, 1u,
-                            expand_timestamp(item.time_us_low, now_us));
-    }
-
-    /* A software-ring overflow means bytes were lost. Mark the in-flight
-       frame (or the next frame) so downstream consumers can detect possible
-       corruption instead of treating the joined bytes as an intact packet. */
-    if (s_seen_ring_overflows != s_ring_overflows) {
-        s_seen_ring_overflows = s_ring_overflows;
-        gpmon_framer_note_uart_error(&s_core->framer);
-    }
-
-    if (s_seen_uart_errors != s_uart_errors) {
-        uint32_t delta = s_uart_errors - s_seen_uart_errors;
-        while (delta--) gpmon_framer_note_uart_error(&s_core->framer);
-        s_seen_uart_errors = s_uart_errors;
-    }
-
-    gpmon_core_tick(s_core, bflb_mtimer_get_time_us());
+    /* Main-board UART1 is serviced first; both framers feed one sequence FIFO. */
+    poll_port(&s_ports[0]);
+    poll_port(&s_ports[1]);
 }
 
 const gpmon_record_t *gpmon_uart_capture_peek(void)
@@ -181,7 +210,7 @@ void gpmon_uart_capture_release(void)
 void gpmon_uart_capture_get_stats(gpmon_uart_capture_stats_t *out)
 {
     if (out == NULL) return;
-    out->rx_bytes = s_rx_bytes;
-    out->rx_ring_overflows = s_ring_overflows;
-    out->uart_error_events = s_uart_errors;
+    out->rx_bytes = s_ports[0].rx_bytes + s_ports[1].rx_bytes;
+    out->rx_ring_overflows = s_ports[0].ring_overflows + s_ports[1].ring_overflows;
+    out->uart_error_events = s_ports[0].uart_errors + s_ports[1].uart_errors;
 }
