@@ -318,6 +318,7 @@ static const char *cgi_gpmonlive(int idx, int num, char *param[], char *val[])
         packet = cJSON_CreateObject();
         if (packet == NULL) continue;
         cJSON_AddNumberToObject(packet, "seq", r->sequence);
+        cJSON_AddNumberToObject(packet, "source_id", r->source_id);
         cJSON_AddNumberToObject(packet, "len", r->length);
         cJSON_AddNumberToObject(packet, "flags", r->flags);
         cJSON_AddNumberToObject(packet, "first_us", (double)r->first_byte_us);
