@@ -14,6 +14,7 @@ int gpmon_flash_queue_init(void);
 int gpmon_flash_queue_pending(uint32_t *count);
 
 int gpmon_flash_queue_push(const gpmon_record_t *record);
+void gpmon_flash_queue_spill_task(void *arg);
 /* peek: 1 = record returned, 0 = empty, -1 = storage error. */
 int gpmon_flash_queue_peek(gpmon_record_t *record);
 /* Call only after the corresponding record receives a valid server ACK. */
