@@ -172,7 +172,7 @@ int main(void)
 {
     board_init();
 
-    printf("\r\nGPMon_v1 starting FreeRTOS\r\n");
+    printf("\r\nGPMon v1.0_17102026\r\n");
 
     if (xTaskCreate(uart_capture_task,
                     "uart_capture",
