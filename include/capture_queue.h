@@ -16,8 +16,8 @@ typedef struct {
     uint16_t length;
     uint16_t dropped_before;
     uint8_t flags;
-    uint8_t source_id; /* 0 = daughter UART0, 1 = main-board UART1 */
     uint8_t payload[GPMON_MAX_PACKET_BYTES];
+    uint8_t source_id; /* 0 = daughter UART0, 1 = main-board UART1; uses tail padding */
 } gpmon_record_t;
 
 typedef struct {
