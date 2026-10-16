@@ -351,6 +351,7 @@ static const char *cgi_serverget(int idx, int num, char *param[], char *val[])
     cJSON_AddBoolToObject(obj, "ok", rc >= 0);
     cJSON_AddStringToObject(obj, "ip", config.ip);
     cJSON_AddNumberToObject(obj, "port", config.port ? config.port : 9100);
+    cJSON_AddStringToObject(obj, "mode", config.mode == GPMON_SERVER_MODE_MANUAL ? "manual" : "auto");
     if (rc < 0) cJSON_AddStringToObject(obj, "error", "Persistent storage unavailable");
 
     json = cJSON_PrintUnformatted(obj);
@@ -362,6 +363,7 @@ static const char *cgi_serverset(int idx, int num, char *param[], char *val[])
 {
     char ip[GPMON_SERVER_IP_MAX] = {0};
     char port_text[8] = {0};
+    char mode[8] = {0};
     unsigned long port;
     int have_ip = 0, have_port = 0;
     cJSON *obj;
@@ -377,15 +379,25 @@ static const char *cgi_serverset(int idx, int num, char *param[], char *val[])
         } else if (strcmp(param[i], "port") == 0) {
             url_decode(port_text, val[i], sizeof(port_text));
             have_port = 1;
+        } else if (strcmp(param[i], "mode") == 0) {
+            url_decode(mode, val[i], sizeof(mode));
         }
     }
 
     obj = cJSON_CreateObject();
     if (obj == NULL) return NULL;
 
-    if (!have_ip || !have_port || port_text[0] == '\0') {
+    if (strcmp(mode, "auto") == 0) {
+        if (gpmon_server_config_set_auto() != 0) {
+            cJSON_AddBoolToObject(obj, "ok", 0);
+            cJSON_AddStringToObject(obj, "error", "Could not save automatic gateway mode");
+        } else {
+            cJSON_AddBoolToObject(obj, "ok", 1);
+            cJSON_AddStringToObject(obj, "message", "Automatic gateway mode saved");
+        }
+    } else if (!have_ip || !have_port || port_text[0] == '\0') {
         cJSON_AddBoolToObject(obj, "ok", 0);
-        cJSON_AddStringToObject(obj, "error", "Server IP and port are required");
+        cJSON_AddStringToObject(obj, "error", "Manual mode requires server IP and port");
     } else {
         char *end = NULL;
         port = strtoul(port_text, &end, 10);
@@ -397,7 +409,7 @@ static const char *cgi_serverset(int idx, int num, char *param[], char *val[])
             cJSON_AddStringToObject(obj, "error", "Invalid IPv4 address or save failed");
         } else {
             cJSON_AddBoolToObject(obj, "ok", 1);
-            cJSON_AddStringToObject(obj, "message", "Server settings saved");
+            cJSON_AddStringToObject(obj, "message", "Manual server settings saved");
             LOG_I("Saved GPMon receiver %s:%u\r\n", ip, (unsigned int)port);
         }
     }
