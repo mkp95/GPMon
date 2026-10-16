@@ -105,8 +105,6 @@ static int init_port(struct bflb_device_s *gpio, uart_port_t *port,
                      uint32_t index)
 {
     struct bflb_uart_config_s cfg;
-    char name[8];
-    (void)name;
     port->uart = bflb_device_get_by_name(index == 0u ? "uart1" : "uart0");
     if (port->uart == NULL) return -1;
 
