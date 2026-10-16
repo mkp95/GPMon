@@ -16,6 +16,7 @@ typedef struct {
     uint16_t length;
     uint16_t dropped_before;
     uint8_t flags;
+    uint8_t source_id; /* 0 = daughter UART0, 1 = main-board UART1 */
     uint8_t payload[GPMON_MAX_PACKET_BYTES];
 } gpmon_record_t;
 
@@ -25,11 +26,15 @@ typedef struct {
     volatile uint32_t head; /* producer publishes; consumer reads */
     volatile uint32_t tail; /* consumer publishes; producer reads */
     uint32_t high_water; /* producer-owned */
+    volatile uint8_t head_claimed; /* serializes sender ACK and flash spill */
 } gpmon_queue_t;
 
 bool gpmon_queue_init(gpmon_queue_t *q);
 bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record);
 const gpmon_record_t *gpmon_queue_peek(const gpmon_queue_t *q);
+int gpmon_queue_claim_head(gpmon_queue_t *q, gpmon_record_t *record);
+void gpmon_queue_finish_claim(gpmon_queue_t *q);
+void gpmon_queue_cancel_claim(gpmon_queue_t *q);
 void gpmon_queue_release(gpmon_queue_t *q);
 uint32_t gpmon_queue_count(const gpmon_queue_t *q);
 uint32_t gpmon_queue_high_water(const gpmon_queue_t *q);
