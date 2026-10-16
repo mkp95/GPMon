@@ -231,7 +231,7 @@ static size_t make_data_frame(const gpmon_record_t *r, uint8_t *frame)
     put_u32(frame + 6, r->sequence);
     frame[10] = s_device_id[0];
     frame[11] = s_device_id[1];
-    frame[12] = 1; /* UART1 */
+    frame[12] = r->source_id; /* 0 = daughter UART0, 1 = main-board UART1 */
     put_u16(frame + 13, len);
     put_u64(frame + 15, packet_epoch(r->first_byte_us));
     put_u64(frame + 23, r->first_byte_us);
@@ -340,26 +340,27 @@ void gpmon_tcp_sender_task(void *arg)
     printf("TCP sender: consuming shared RAM capture queue; flash is overflow backlog\r\n");
 
     for (;;) {
-        const gpmon_record_t *queued = gpmon_queue_peek(queue);
+        uint32_t flash_pending = 0;
+        int pending_rc = gpmon_flash_queue_pending(&flash_pending);
         int source = 0; /* 0 = RAM queue, 1 = flash spool */
 
-        if (queued != NULL) {
-            record = *queued;
-        } else {
+        /* Flash always contains older records than RAM while the spill
+           worker is active, so it must be drained first. */
+        if (pending_rc != 0 || flash_pending != 0u) {
             int flash_rc = gpmon_flash_queue_peek(&record);
             if (flash_rc <= 0) {
-                if (flash_rc < 0)
-                    vTaskDelay(pdMS_TO_TICKS(250));
-                else
-                    vTaskDelay(pdMS_TO_TICKS(20));
+                vTaskDelay(pdMS_TO_TICKS(flash_rc < 0 ? 250 : 10));
                 continue;
             }
             source = 1;
+        } else if (!gpmon_queue_claim_head(queue, &record)) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
         }
 
         if (record.length == 0 || record.length > GPMON_MAX_PACKET_BYTES) {
             printf("TCP: invalid queued record; discarding source=%d\r\n", source);
-            if (source == 0) gpmon_queue_release(queue);
+            if (source == 0) gpmon_queue_finish_claim(queue);
             else (void)gpmon_flash_queue_ack();
             continue;
         }
@@ -409,7 +410,7 @@ void gpmon_tcp_sender_task(void *arg)
                            (unsigned long)record.sequence,
                            source == 0 ? "ram" : "flash");
                     if (source == 0) {
-                        gpmon_queue_release(queue);
+                        gpmon_queue_finish_claim(queue);
                     } else if (gpmon_flash_queue_ack() != 0) {
                         printf("TCP: flash ACK cursor save failed; duplicate replay may occur after reset\r\n");
                     }
