@@ -11,9 +11,9 @@ typedef struct {
     uint32_t uart_error_events;
 } gpmon_uart_capture_stats_t;
 
-/* Configure UART1 RX=GPIO11, TX=GPIO12 and enable RX interrupts. */
+/* Configure main UART1 (GPIO11/12) and daughter UART0 (GPIO7/16). */
 bool gpmon_uart_capture_init(gpmon_core_t *core);
-/* Drain ISR data and advance the configured silence-based framer. Non-blocking. */
+/* Drain both RX rings, servicing main-board UART1 first. Both feed one FIFO. */
 void gpmon_uart_capture_poll(void);
 /* Pop one complete packet from the core's RAM queue. */
 const gpmon_record_t *gpmon_uart_capture_peek(void);
