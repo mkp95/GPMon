@@ -92,7 +92,7 @@ static uint32_t record_crc(const gpmon_record_t *r)
     crc = crc_update(crc, (const uint8_t *)&r->length, sizeof(r->length));
     crc = crc_update(crc, (const uint8_t *)&r->dropped_before, sizeof(r->dropped_before));
     crc = crc_update(crc, (const uint8_t *)&r->flags, sizeof(r->flags));
-    crc = crc_update(crc, (const uint8_t *)&r->source_id, sizeof(r->source_id));
+    /* Source ID occupies prior structure padding; exclude it from the legacy CRC. */
     crc = crc_update(crc, r->payload, r->length);
     return ~crc;
 }
@@ -596,8 +596,8 @@ void gpmon_flash_queue_spill_task(void *arg)
     for (;;) {
         uint32_t pending = 0;
         (void)gpmon_flash_queue_pending(&pending);
-        uint32_t threshold = (queue->capacity *
-                              GPMON_FLASH_SPILL_THRESHOLD_PERCENT) / 100u;
+        uint32_t threshold = queue->capacity < GPMON_FLASH_SPILL_THRESHOLD_RECORDS
+                             ? queue->capacity : GPMON_FLASH_SPILL_THRESHOLD_RECORDS;
         uint32_t count = gpmon_queue_count(queue);
 
         if (count != 0u && (count >= threshold || pending != 0u)) {
