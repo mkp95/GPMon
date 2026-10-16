@@ -24,6 +24,7 @@ typedef struct {
     uint64_t last_byte_us;
     uint8_t flags;
     uint8_t pending_flags;
+    uint8_t source_id;
     bool open;
     uint16_t dropped_before;
     uint32_t next_sequence;
@@ -31,6 +32,7 @@ typedef struct {
 } gpmon_framer_t;
 
 void gpmon_framer_init(gpmon_framer_t *f);
+void gpmon_framer_init_source(gpmon_framer_t *f, uint8_t source_id);
 /* Each feed call must represent a contiguous RX burst. If the UART hardware
  * reports a receive-timeout boundary, feed/tick must preserve that boundary. */
 void gpmon_framer_feed(gpmon_framer_t *f, gpmon_queue_t *q,

@@ -172,7 +172,7 @@ int main(void)
 {
     board_init();
 
-    printf("\r\nGPMon_v1 starting FreeRTOS\r\n");
+    printf("\r\nGPMon v1.0_17102026\r\n");
 
     if (xTaskCreate(uart_capture_task,
                     "uart_capture",
@@ -188,6 +188,15 @@ int main(void)
 
     if (gpmon_wifi_provision_start() != 0) {
         printf("WARNING: Wi-Fi provisioning unavailable; UART capture will continue\r\n");
+    }
+
+    if (xTaskCreate(gpmon_flash_queue_spill_task,
+                    "gpmon_spill",
+                    1024,
+                    &s_core.queue,
+                    10,
+                    NULL) != pdPASS) {
+        printf("WARNING: flash FIFO spill task creation failed\\r\\n");
     }
 
     if (xTaskCreate(gpmon_tcp_sender_task,

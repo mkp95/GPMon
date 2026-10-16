@@ -21,6 +21,7 @@
 #define SPOOL_STATE_MAGIC 0x47504D53u
 #define SPOOL_VERSION     1u
 #define SPOOL_BLOCK_SIZE  4096u
+#define SPOOL_ACK_CHECKPOINT_RECORDS 32u
 
 typedef struct {
     uint32_t magic;
@@ -53,6 +54,8 @@ static uint32_t s_pending;
 static uint32_t s_file_size;
 static uint32_t s_write_failures;
 static uint32_t s_corrupt_records;
+/* Number of flash records ACKed since the last durable cursor checkpoint. */
+static uint32_t s_acks_since_checkpoint;
 static int s_ready;
 static int s_spill_latched;
 
@@ -92,6 +95,7 @@ static uint32_t record_crc(const gpmon_record_t *r)
     crc = crc_update(crc, (const uint8_t *)&r->length, sizeof(r->length));
     crc = crc_update(crc, (const uint8_t *)&r->dropped_before, sizeof(r->dropped_before));
     crc = crc_update(crc, (const uint8_t *)&r->flags, sizeof(r->flags));
+    /* Source ID occupies prior structure padding; exclude it from the legacy CRC. */
     crc = crc_update(crc, r->payload, r->length);
     return ~crc;
 }
@@ -293,6 +297,7 @@ static int compact_locked(void)
     (void)lfs_remove(s_lfs, SPOOL_OLD_PATH);
     s_file_size = remaining;
     s_state.head_offset = 0;
+    s_acks_since_checkpoint = 0;
     s_spill_latched = s_pending != 0;
     return 0;
 }
@@ -427,6 +432,7 @@ int gpmon_flash_queue_push(const gpmon_record_t *record)
             s_write_failures++;
             return -1;
         }
+        s_acks_since_checkpoint = 0;
         rc = lfs_file_open(s_lfs, &file, SPOOL_LOG_PATH, LFS_O_RDWR);
         if (rc != 0 || lfs_file_truncate(s_lfs, &file, 0) != 0) {
             if (rc == 0) lfs_file_close(s_lfs, &file);
@@ -517,9 +523,15 @@ int gpmon_flash_queue_peek(gpmon_record_t *record)
                 xSemaphoreGive(s_lock);
                 return -1;
             }
+            s_acks_since_checkpoint = 0;
             continue;
         }
         *record = entry.record;
+        /* Legacy spool entries predate source IDs; interpret them as UART1. */
+        if (record->source_id_valid != 0xA5u) {
+            record->source_id = 1u;
+            record->source_id_valid = 0xA5u;
+        }
         xSemaphoreGive(s_lock);
         return 1;
     }
@@ -540,14 +552,16 @@ int gpmon_flash_queue_ack(void)
 
     s_state.head_offset += sizeof(spool_entry_t);
     s_pending--;
+    s_acks_since_checkpoint++;
     s_spill_latched = s_pending != 0;
 
     if (s_pending == 0) {
-        /* Reset state first. A reset before truncation can only replay
-           acknowledged records; it cannot skip unacknowledged ones. */
+        /* Persist the empty cursor before truncation. A reset before
+           truncation can only replay acknowledged records. */
         s_state.head_offset = 0;
         int state_rc = store_state_locked();
         if (state_rc == 0) {
+            s_acks_since_checkpoint = 0;
             lfs_file_t file;
             if (lfs_file_open(s_lfs, &file, SPOOL_LOG_PATH, LFS_O_RDWR) == 0) {
                 if (lfs_file_truncate(s_lfs, &file, 0) == 0) s_file_size = 0;
@@ -558,7 +572,18 @@ int gpmon_flash_queue_ack(void)
         return state_rc;
     }
 
-    int state_rc = store_state_locked();
+    /*
+     * ACK each record on TCP, but persist the flash cursor only every
+     * 32 records. A reset may replay up to 31 already-ACKed records;
+     * the receiver deduplicates matching (device_id, sequence_no) records.
+     * Compaction below still checkpoints before changing the spool layout.
+     */
+    int state_rc = 0;
+    if (s_acks_since_checkpoint >= SPOOL_ACK_CHECKPOINT_RECORDS) {
+        state_rc = store_state_locked();
+        if (state_rc == 0) s_acks_since_checkpoint = 0;
+    }
+
     if (state_rc == 0 && compact_locked() != 0)
         s_write_failures++;
     xSemaphoreGive(s_lock);
@@ -582,4 +607,35 @@ uint32_t gpmon_flash_queue_used_bytes(void)
     used = s_file_size;
     xSemaphoreGive(s_lock);
     return used;
+}
+
+
+/* Migrate oldest RAM entries only after acquiring exclusive ownership of the
+ * queue head. Release RAM only after the flash append has succeeded. */
+void gpmon_flash_queue_spill_task(void *arg)
+{
+    gpmon_queue_t *queue = (gpmon_queue_t *)arg;
+    if (queue == NULL) { vTaskDelete(NULL); return; }
+
+    for (;;) {
+        uint32_t threshold = queue->capacity < GPMON_FLASH_SPILL_THRESHOLD_RECORDS
+                             ? queue->capacity : GPMON_FLASH_SPILL_THRESHOLD_RECORDS;
+        uint32_t count = gpmon_queue_count(queue);
+
+        if (count != 0u && count >= threshold) {
+            gpmon_record_t record;
+            if (gpmon_queue_claim_head(queue, &record)) {
+                if (gpmon_flash_queue_push(&record) == 0) {
+                    gpmon_queue_finish_claim(queue);
+                } else {
+                    gpmon_queue_cancel_claim(queue);
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(2));
+            }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
 }

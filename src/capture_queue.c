@@ -1,5 +1,6 @@
 #include "capture_queue.h"
 #include "FreeRTOS.h"
+#include "task.h"
 #include <string.h>
 
 _Static_assert(GPMON_MAX_PACKET_BYTES > 0u,
@@ -73,6 +74,8 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
     slot->length = record->length;
     slot->dropped_before = record->dropped_before;
     slot->flags = record->flags;
+    slot->source_id = record->source_id;
+    slot->source_id_valid = record->source_id_valid;
     memcpy(slot->payload, record->payload, record->length);
 
     /* Publish record bytes before making the slot visible to the sender task. */
@@ -88,6 +91,41 @@ const gpmon_record_t *gpmon_queue_peek(const gpmon_queue_t *q)
     /* Pair with the producer's publish barrier before reading slot contents. */
     __sync_synchronize();
     return &q->slots[q->tail % q->capacity];
+}
+
+int gpmon_queue_claim_head(gpmon_queue_t *q, gpmon_record_t *record)
+{
+    int claimed = 0;
+    if (q == NULL || record == NULL || q->slots == NULL) return 0;
+    taskENTER_CRITICAL();
+    if (q->tail != q->head && !q->head_claimed) {
+        q->head_claimed = 1;
+        __sync_synchronize();
+        *record = q->slots[q->tail % q->capacity];
+        claimed = 1;
+    }
+    taskEXIT_CRITICAL();
+    return claimed;
+}
+
+void gpmon_queue_finish_claim(gpmon_queue_t *q)
+{
+    if (q == NULL) return;
+    taskENTER_CRITICAL();
+    if (q->head_claimed && q->tail != q->head) {
+        __sync_synchronize();
+        q->tail++;
+    }
+    q->head_claimed = 0;
+    taskEXIT_CRITICAL();
+}
+
+void gpmon_queue_cancel_claim(gpmon_queue_t *q)
+{
+    if (q == NULL) return;
+    taskENTER_CRITICAL();
+    q->head_claimed = 0;
+    taskEXIT_CRITICAL();
 }
 
 void gpmon_queue_release(gpmon_queue_t *q)

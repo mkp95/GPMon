@@ -66,7 +66,7 @@ static const char data_index_html[] =
 "<div id=\"serverMsg\" class=\"hide\"></div>"
 "<p style=\"font-size:12px;color:#666\">The receiver must be reachable on this network. Default port: 9100.</p>"
 "</div>"
-"<section class=\"dash\"><h2>Live UART Monitor</h2>"
+"<section class=\"dash\"><h2>GPMon v1.0_17102026</h2><h2>Live UART Monitor</h2>"
 "<div class=\"metrics\">"
 "<div class=\"metric\"><small>Packets</small><strong id=\"mPackets\">0</strong></div>"
 "<div class=\"metric\"><small>RX bytes</small><strong id=\"mBytes\">0</strong></div>"
