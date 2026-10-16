@@ -18,7 +18,8 @@ static void resolve_gateway(gpmon_server_config_t *out)
     ip4_addr_t addr;
     out->ip[0] = '\0';
     out->port = 9100;
-    if (wifi_mgmr_sta_ip_get(&ip, &gateway, &mask) == 0 && gateway != 0) {
+    wifi_mgmr_sta_ip_get(&ip, &gateway, &mask);
+    if (gateway != 0) {
         addr.addr = gateway;
         const char *text = ip4addr_ntoa(&addr);
         if (text != NULL && strnlen(text, GPMON_SERVER_IP_MAX) < GPMON_SERVER_IP_MAX)
