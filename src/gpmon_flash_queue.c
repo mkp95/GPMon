@@ -521,6 +521,11 @@ int gpmon_flash_queue_peek(gpmon_record_t *record)
             continue;
         }
         *record = entry.record;
+        /* Legacy spool entries predate source IDs; interpret them as UART1. */
+        if (record->source_id_valid != 0xA5u) {
+            record->source_id = 1u;
+            record->source_id_valid = 0xA5u;
+        }
         xSemaphoreGive(s_lock);
         return 1;
     }
