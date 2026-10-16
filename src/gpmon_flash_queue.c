@@ -21,6 +21,7 @@
 #define SPOOL_STATE_MAGIC 0x47504D53u
 #define SPOOL_VERSION     1u
 #define SPOOL_BLOCK_SIZE  4096u
+#define SPOOL_ACK_CHECKPOINT_RECORDS 32u
 
 typedef struct {
     uint32_t magic;
@@ -53,6 +54,8 @@ static uint32_t s_pending;
 static uint32_t s_file_size;
 static uint32_t s_write_failures;
 static uint32_t s_corrupt_records;
+/* Number of flash records ACKed since the last durable cursor checkpoint. */
+static uint32_t s_acks_since_checkpoint;
 static int s_ready;
 static int s_spill_latched;
 
@@ -294,6 +297,7 @@ static int compact_locked(void)
     (void)lfs_remove(s_lfs, SPOOL_OLD_PATH);
     s_file_size = remaining;
     s_state.head_offset = 0;
+    s_acks_since_checkpoint = 0;
     s_spill_latched = s_pending != 0;
     return 0;
 }
@@ -428,6 +432,7 @@ int gpmon_flash_queue_push(const gpmon_record_t *record)
             s_write_failures++;
             return -1;
         }
+        s_acks_since_checkpoint = 0;
         rc = lfs_file_open(s_lfs, &file, SPOOL_LOG_PATH, LFS_O_RDWR);
         if (rc != 0 || lfs_file_truncate(s_lfs, &file, 0) != 0) {
             if (rc == 0) lfs_file_close(s_lfs, &file);
@@ -518,6 +523,7 @@ int gpmon_flash_queue_peek(gpmon_record_t *record)
                 xSemaphoreGive(s_lock);
                 return -1;
             }
+            s_acks_since_checkpoint = 0;
             continue;
         }
         *record = entry.record;
@@ -546,14 +552,16 @@ int gpmon_flash_queue_ack(void)
 
     s_state.head_offset += sizeof(spool_entry_t);
     s_pending--;
+    s_acks_since_checkpoint++;
     s_spill_latched = s_pending != 0;
 
     if (s_pending == 0) {
-        /* Reset state first. A reset before truncation can only replay
-           acknowledged records; it cannot skip unacknowledged ones. */
+        /* Persist the empty cursor before truncation. A reset before
+           truncation can only replay acknowledged records. */
         s_state.head_offset = 0;
         int state_rc = store_state_locked();
         if (state_rc == 0) {
+            s_acks_since_checkpoint = 0;
             lfs_file_t file;
             if (lfs_file_open(s_lfs, &file, SPOOL_LOG_PATH, LFS_O_RDWR) == 0) {
                 if (lfs_file_truncate(s_lfs, &file, 0) == 0) s_file_size = 0;
@@ -564,7 +572,18 @@ int gpmon_flash_queue_ack(void)
         return state_rc;
     }
 
-    int state_rc = store_state_locked();
+    /*
+     * ACK each record on TCP, but persist the flash cursor only every
+     * 32 records. A reset may replay up to 31 already-ACKed records;
+     * the receiver deduplicates matching (device_id, sequence_no) records.
+     * Compaction below still checkpoints before changing the spool layout.
+     */
+    int state_rc = 0;
+    if (s_acks_since_checkpoint >= SPOOL_ACK_CHECKPOINT_RECORDS) {
+        state_rc = store_state_locked();
+        if (state_rc == 0) s_acks_since_checkpoint = 0;
+    }
+
     if (state_rc == 0 && compact_locked() != 0)
         s_write_failures++;
     xSemaphoreGive(s_lock);
