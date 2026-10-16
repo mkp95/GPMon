@@ -14,7 +14,7 @@
 - `source_id = 0`: daughter-board UART0, default BL602DK pins RX GPIO7 / TX GPIO16.
 - `source_id = 1`: main-board UART1, RX GPIO11 / TX GPIO12. UART1 is serviced first.
 - Both framers feed the same sequence-numbered RAM FIFO.
-- The source ID is carried in the existing one-byte source/UART field at frame offset 12; the frame size and offsets after that field are unchanged.
+- The source ID is carried in the existing one-byte source/UART field at frame offset 12; the frame size and offsets after that field are unchanged. Legacy flash records without a source marker are treated as main-board UART1 records.
 
 ## Automatic and manual receiver selection
 
