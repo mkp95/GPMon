@@ -92,6 +92,7 @@ static uint32_t record_crc(const gpmon_record_t *r)
     crc = crc_update(crc, (const uint8_t *)&r->length, sizeof(r->length));
     crc = crc_update(crc, (const uint8_t *)&r->dropped_before, sizeof(r->dropped_before));
     crc = crc_update(crc, (const uint8_t *)&r->flags, sizeof(r->flags));
+    crc = crc_update(crc, (const uint8_t *)&r->source_id, sizeof(r->source_id));
     crc = crc_update(crc, r->payload, r->length);
     return ~crc;
 }
@@ -582,4 +583,37 @@ uint32_t gpmon_flash_queue_used_bytes(void)
     used = s_file_size;
     xSemaphoreGive(s_lock);
     return used;
+}
+
+
+/* Migrate oldest RAM entries only after acquiring exclusive ownership of the
+ * queue head. Release RAM only after the flash append has succeeded. */
+void gpmon_flash_queue_spill_task(void *arg)
+{
+    gpmon_queue_t *queue = (gpmon_queue_t *)arg;
+    if (queue == NULL) vTaskDelete(NULL);
+
+    for (;;) {
+        uint32_t pending = 0;
+        (void)gpmon_flash_queue_pending(&pending);
+        uint32_t threshold = (queue->capacity *
+                              GPMON_FLASH_SPILL_THRESHOLD_PERCENT) / 100u;
+        uint32_t count = gpmon_queue_count(queue);
+
+        if (count != 0u && (count >= threshold || pending != 0u)) {
+            gpmon_record_t record;
+            if (gpmon_queue_claim_head(queue, &record)) {
+                if (gpmon_flash_queue_push(&record) == 0) {
+                    gpmon_queue_finish_claim(queue);
+                } else {
+                    gpmon_queue_cancel_claim(queue);
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(2));
+            }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
 }
