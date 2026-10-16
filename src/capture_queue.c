@@ -74,6 +74,7 @@ bool gpmon_queue_push(gpmon_queue_t *q, const gpmon_record_t *record)
     slot->dropped_before = record->dropped_before;
     slot->flags = record->flags;
     slot->source_id = record->source_id;
+    slot->source_id_valid = record->source_id_valid;
     memcpy(slot->payload, record->payload, record->length);
 
     /* Publish record bytes before making the slot visible to the sender task. */
