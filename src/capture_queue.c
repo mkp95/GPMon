@@ -1,5 +1,6 @@
 #include "capture_queue.h"
 #include "FreeRTOS.h"
+#include "task.h"
 #include <string.h>
 
 _Static_assert(GPMON_MAX_PACKET_BYTES > 0u,
