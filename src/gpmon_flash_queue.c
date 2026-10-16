@@ -591,7 +591,7 @@ uint32_t gpmon_flash_queue_used_bytes(void)
 void gpmon_flash_queue_spill_task(void *arg)
 {
     gpmon_queue_t *queue = (gpmon_queue_t *)arg;
-    if (queue == NULL) vTaskDelete(NULL);
+    if (queue == NULL) { vTaskDelete(NULL); return; }
 
     for (;;) {
         uint32_t pending = 0;
