@@ -346,7 +346,7 @@ void gpmon_tcp_sender_task(void *arg)
 
         /* Flash always contains older records than RAM while the spill
            worker is active, so it must be drained first. */
-        if (pending_rc != 0 || flash_pending != 0u) {
+        if (flash_pending != 0u) {
             int flash_rc = gpmon_flash_queue_peek(&record);
             if (flash_rc <= 0) {
                 vTaskDelay(pdMS_TO_TICKS(flash_rc < 0 ? 250 : 10));
@@ -368,12 +368,15 @@ void gpmon_tcp_sender_task(void *arg)
         web_config_publish_packet(&record);
         size_t frame_len = make_data_frame(&record, frame);
 
+        int retry_select = 0;
         for (;;) {
             if (gpmon_server_config_get(&cfg) != 0 ||
                 cfg.ip[0] == '\0' || cfg.port == 0) {
                 close_socket(&fd);
+                if (source == 0) gpmon_queue_cancel_claim(queue);
                 vTaskDelay(pdMS_TO_TICKS(2000));
-                continue;
+                retry_select = 1;
+                break;
             }
 
             if (fd >= 0 &&
@@ -421,7 +424,11 @@ void gpmon_tcp_sender_task(void *arg)
             printf("TCP: send/ACK failed for seq=%lu; retrying\r\n",
                    (unsigned long)record.sequence);
             close_socket(&fd);
+            if (source == 0) gpmon_queue_cancel_claim(queue);
             vTaskDelay(pdMS_TO_TICKS(1000));
+            retry_select = 1;
+            break;
         }
+        if (retry_select) continue;
     }
 }
