@@ -390,8 +390,10 @@ void gpmon_tcp_sender_task(void *arg)
                 if (fd < 0) {
                     printf("TCP: connect to %s:%u failed; retrying\r\n",
                            cfg.ip, (unsigned)cfg.port);
+                    if (source == 0) gpmon_queue_cancel_claim(queue);
                     vTaskDelay(pdMS_TO_TICKS(2000));
-                    continue;
+                    retry_select = 1;
+                    break;
                 }
 
                 strncpy(connected_ip, cfg.ip, sizeof(connected_ip) - 1);
