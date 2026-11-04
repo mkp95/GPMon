@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/xuantie-gcc-riscv-v2.6.1-linux-x86_64.tar.xz"
-          url="https://github.com/bouffalolab/toolchain/releases/download/default/xuantie-gcc-riscv-v2.6.1-linux-x86_64.tar.xz"
+          url="https://github.com/bouffalolab/toolchain/releases/download/compact-old/xuantie-gcc-riscv-v2.6.1-linux-x86_64.tar.xz"
           curl --fail --location --retry 3 "$url" --output "$archive"
           echo "83817bd7cab693fc249bb98869de5e475c1ede577f4a188869fed96c8dbb8e1a  $archive" | sha256sum --check
           mkdir -p "$RUNNER_TEMP/xuantie-toolchain"
