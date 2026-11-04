@@ -411,7 +411,7 @@ static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[]
         "catch(e){document.getElementById('status').textContent='Could not load settings: '+e}}"
         "async function save(){let m=document.getElementById('mode').value;let q=m==='auto'?'mode=auto':'mode=manual&ip='+encodeURIComponent(document.getElementById('ip').value)+'&port='+encodeURIComponent(document.getElementById('port').value);"
         "try{let r=await fetch('/serverset?'+q);let d=await r.json();document.getElementById('status').textContent=d.message||d.error||JSON.stringify(d);if(d.ok)load()}"
-        "catch(e){document.getElementById('status').textContent='Save failed: '+e}}
+        "catch(e){document.getElementById('status').textContent='Save failed: '+e}}"
         "async function remoteReset(){if(!confirm('Restart the GPMon MCU now? Data currently only in RAM may be lost.'))return;"
         "try{let r=await fetch('/gpmonreset?confirm=yes');let d=await r.json();document.getElementById('status').textContent=d.message||d.error||JSON.stringify(d)}"
         "catch(e){document.getElementById('status').textContent='Reset requested; device is restarting or connection was lost.'}}load();</script></body></html>";
