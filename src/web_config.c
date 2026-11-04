@@ -9,6 +9,7 @@
 #include <lwip/ip4_addr.h>
 #include "cJSON.h"
 #include "wifi_mgmr_ext.h"
+#include "bl_sys.h"
 
 #define DBG_TAG "WEB"
 #include "log.h"
@@ -29,6 +30,7 @@ static uint32_t g_live_queue_high_water = 0;
 static web_config_t *g_ctx = NULL;
 static TimerHandle_t g_ap_close_timer = NULL;
 static volatile int g_scanning = 0;
+static volatile int g_reset_pending = 0;
 
 typedef struct {
     wifi_mgmr_ap_item_t items[SCAN_AP_MAX];
@@ -339,6 +341,56 @@ cleanup:
 }
 
 
+static void remote_reset_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    LOG_W("Remote reset requested; restarting MCU\\r\\n");
+    bl_sys_reset_por();
+    vTaskDelete(NULL);
+}
+
+static const char *cgi_gpmonreset(int idx, int num, char *param[], char *val[])
+{
+    cJSON *obj;
+    char *json;
+    int confirmed = 0;
+    (void)idx;
+
+    for (int i = 0; i < num; i++) {
+        if (strcmp(param[i], "confirm") == 0 && strcmp(val[i], "yes") == 0) {
+            confirmed = 1;
+            break;
+        }
+    }
+
+    obj = cJSON_CreateObject();
+    if (!obj) return NULL;
+
+    if (!confirmed) {
+        cJSON_AddBoolToObject(obj, "ok", 0);
+        cJSON_AddStringToObject(obj, "error", "Confirmation required");
+    } else if (g_reset_pending) {
+        cJSON_AddBoolToObject(obj, "ok", 0);
+        cJSON_AddStringToObject(obj, "error", "Reset already pending");
+    } else {
+        g_reset_pending = 1;
+        if (xTaskCreate(remote_reset_task, "remote_reset", 256, NULL,
+                        configMAX_PRIORITIES - 1, NULL) != pdPASS) {
+            g_reset_pending = 0;
+            cJSON_AddBoolToObject(obj, "ok", 0);
+            cJSON_AddStringToObject(obj, "error", "Could not start reset task");
+        } else {
+            cJSON_AddBoolToObject(obj, "ok", 1);
+            cJSON_AddStringToObject(obj, "message", "MCU will restart in about one second");
+        }
+    }
+
+    json = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return json;
+}
+
 static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[])
 {
     static const char page[] =
@@ -351,7 +403,7 @@ static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[]
         "<option value='manual'>Manual server IP</option></select></label>"
         "<div id='manual'><label>Server IPv4 address<input id='ip' inputmode='decimal' placeholder='192.168.1.50'></label>"
         "<label>Port<input id='port' type='number' min='1' max='65535' value='9100'></label></div>"
-        "<button onclick='save()'>Save settings</button><p id='status'>Loading settings...</p>"
+        "<button onclick='save()'>Save settings</button><hr><h2>Device maintenance</h2><p>Restart the MCU if it stops responding. Saved settings and flash data are retained.</p><button onclick='remoteReset()' style='background:#b91c1c;color:white'>Remote MCU reset</button><p id='status'>Loading settings...</p>"
         "<script>function showManual(){document.getElementById('manual').style.display=document.getElementById('mode').value==='manual'?'block':'none'}"
         "async function load(){try{let r=await fetch('/serverget');let d=await r.json();document.getElementById('mode').value=d.mode||'auto';"
         "document.getElementById('ip').value=d.ip||'';document.getElementById('port').value=d.port||9100;"
@@ -359,7 +411,10 @@ static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[]
         "catch(e){document.getElementById('status').textContent='Could not load settings: '+e}}"
         "async function save(){let m=document.getElementById('mode').value;let q=m==='auto'?'mode=auto':'mode=manual&ip='+encodeURIComponent(document.getElementById('ip').value)+'&port='+encodeURIComponent(document.getElementById('port').value);"
         "try{let r=await fetch('/serverset?'+q);let d=await r.json();document.getElementById('status').textContent=d.message||d.error||JSON.stringify(d);if(d.ok)load()}"
-        "catch(e){document.getElementById('status').textContent='Save failed: '+e}}load();</script></body></html>";
+        "catch(e){document.getElementById('status').textContent='Save failed: '+e}}
+        "async function remoteReset(){if(!confirm('Restart the GPMon MCU now? Data currently only in RAM may be lost.'))return;"
+        "try{let r=await fetch('/gpmonreset?confirm=yes');let d=await r.json();document.getElementById('status').textContent=d.message||d.error||JSON.stringify(d)}"
+        "catch(e){document.getElementById('status').textContent='Reset requested; device is restarting or connection was lost.'}}load();</script></body></html>";
     (void)idx; (void)num; (void)param; (void)val;
     return page;
 }
@@ -477,6 +532,7 @@ static const tCGI cgi_handlers[] = {
     {"/serverget", cgi_serverget},
     {"/serverset", cgi_serverset},
     {"/gpmonlive", cgi_gpmonlive},
+    {"/gpmonreset", cgi_gpmonreset},
 };
 
 static void ap_close_timer_cb(TimerHandle_t xTimer)
