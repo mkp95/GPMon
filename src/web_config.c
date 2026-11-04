@@ -345,7 +345,7 @@ static void remote_reset_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1000));
-    LOG_W("Remote reset requested; restarting MCU\\r\\n");
+    LOG_W("Remote reset requested; restarting MCU\r\n");
     bl_sys_reset_por();
     vTaskDelete(NULL);
 }
@@ -403,7 +403,7 @@ static const char *cgi_serverconfig(int idx, int num, char *param[], char *val[]
         "<option value='manual'>Manual server IP</option></select></label>"
         "<div id='manual'><label>Server IPv4 address<input id='ip' inputmode='decimal' placeholder='192.168.1.50'></label>"
         "<label>Port<input id='port' type='number' min='1' max='65535' value='9100'></label></div>"
-        "<button onclick='save()'>Save settings</button><hr><h2>Device maintenance</h2><p>Restart the MCU if it stops responding. Saved settings and flash data are retained.</p><button onclick='remoteReset()' style='background:#b91c1c;color:white'>Remote MCU reset</button><p id='status'>Loading settings...</p>"
+        "<button onclick='save()'>Save settings</button><hr><h2>Device maintenance</h2><p>Restart the MCU if it stops responding. Saved settings and records already committed to flash are retained; records still in RAM may be lost.</p><button onclick='remoteReset()' style='background:#b91c1c;color:white'>Remote MCU reset</button><p id='status'>Loading settings...</p>"
         "<script>function showManual(){document.getElementById('manual').style.display=document.getElementById('mode').value==='manual'?'block':'none'}"
         "async function load(){try{let r=await fetch('/serverget');let d=await r.json();document.getElementById('mode').value=d.mode||'auto';"
         "document.getElementById('ip').value=d.ip||'';document.getElementById('port').value=d.port||9100;"
